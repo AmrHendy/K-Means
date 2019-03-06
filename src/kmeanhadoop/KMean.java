@@ -1,6 +1,8 @@
 package kmeanhadoop;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 
 import org.apache.hadoop.conf.Configuration;
@@ -22,6 +24,9 @@ public class KMean {
 			System.exit(-1);
 		}
 		
+		int k = Integer.valueOf(args[2]) ;
+		int dim = Integer.valueOf(args[3]) ;
+		
 		Job init_job = Job.getInstance() ;
 		
 		Configuration init_conf = init_job.getConfiguration();
@@ -35,13 +40,15 @@ public class KMean {
 		init_job.setOutputKeyClass(IntWritable.class);
 		init_job.setOutputValueClass(Text.class);
 		
+		
 		FileInputFormat.addInputPath(init_job, new Path(args[0]));
 		//TODO check rewrite in future
 		FileOutputFormat.setOutputPath(init_job, new Path(args[1]));
 		
 		init_job.waitForCompletion(true);
 		
-		
+		Double[][] old_centroids = new Double[k][dim] ;
+
 		while(true) {
 			
 			Job kmean_cluster_jb = Job.getInstance() ;
@@ -56,27 +63,37 @@ public class KMean {
 			kmean_cluster_jb.setOutputKeyClass(IntWritable.class);
 			kmean_cluster_jb.setOutputValueClass(Text.class);
 			
+			FileInputFormat.addInputPath(kmean_cluster_jb, new Path(args[0]));
 			//TODO check rewrite in future
+			FileOutputFormat.setOutputPath(kmean_cluster_jb, new Path(args[1]));
+			
+			// TODO check rewrite in future
 			String uri =  args[1];
 			Configuration temp_conf = new Configuration();
 			FileSystem fs = FileSystem.get(URI.create(uri), temp_conf); 
 			Path input_path = new Path(uri);
 			FSDataInputStream input_stream = fs.open(input_path);
+			BufferedReader input_buffer = new BufferedReader(new InputStreamReader(input_stream));
+	
+			double total_dis = 0 ;
 			
-			int k = Integer.valueOf(args[2]);
+			Double[][] new_centroids = new Double[k][dim] ;
 			for(int i = 0 ; i < k ; i++) {	
-				String line = input_stream.readL ; 
+				String line = input_buffer.readLine() ;
+				int key = Integer.valueOf(line.split("\t")[0]) ;
+				String[] old_centroid = line.split("\t")[1].split(",") ;
+				for(int j = 0 ; j < dim ; j++) {
+					new_centroids[key][j] = Double.valueOf(old_centroid[j]) ;
+					total_dis += Math.pow(new_centroids[key][j] - old_centroids[key][j], 2) ;
+				}
+				conf.set("kmeans.centroid" + key, line.split("\t")[1]);
 			}
 			
+			double threshold = Math.pow(0.001 ,2) * k * dim  ;
+			if(total_dis < threshold)
+				break ;
 			
-			
+			kmean_cluster_jb.waitForCompletion(true) ;
 		}
-		
-		
-		
-		
-		
-		
 	}
-	
 }
