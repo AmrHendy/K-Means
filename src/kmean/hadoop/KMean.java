@@ -1,12 +1,10 @@
-package kmeanhadoop;
+package kmean.hadoop;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
@@ -52,6 +50,8 @@ public class KMean {
 		double[][] old_centroids = new double[k][dim] ;
 
 		int fi = 1 ;
+		
+		long t1 =  System.currentTimeMillis() ;
 		
 		while(true) {
 			
@@ -99,7 +99,6 @@ public class KMean {
 			
 			double threshold = Math.pow(0.001 ,2) * k * dim  ;
 			
-			System.out.println("*****************" + total_dis);
 			if(total_dis < threshold)
 				break ;
 			
@@ -113,5 +112,9 @@ public class KMean {
 			
 			fi++ ;
 		}
+
+		long t2 =  System.currentTimeMillis() ;
+		System.out.println("\n Time token by un-parallel is : " + (t2-t1) + "ms");
 	}
+	
 }

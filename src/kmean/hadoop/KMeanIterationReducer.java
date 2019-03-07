@@ -1,4 +1,4 @@
-package kmeanhadoop;
+package kmean.hadoop;
 
 import java.io.IOException;
 
