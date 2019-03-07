@@ -28,9 +28,9 @@ public class KMeanIterationMapper extends Mapper<LongWritable, Text, IntWritable
 			String[] centroid_dim_split = centroid.split(",") ;
 			
 			double distance = 0 ;
-			for(int j = 0 ; j < dimensions.length ; j++) {
+			for(int j = 0 ; j < dimensions.length-1  ; j++) {
 				double point_dim = Double.parseDouble(dimensions[j]) ;
-				double centroid_dim = Double.parseDouble(centroid_dim_split[i]) ;
+				double centroid_dim = Double.parseDouble(centroid_dim_split[j]) ;
 				distance += Math.pow(point_dim - centroid_dim, 2) ; 
 			}
 			
