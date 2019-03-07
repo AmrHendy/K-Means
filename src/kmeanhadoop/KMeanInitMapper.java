@@ -13,14 +13,22 @@ public class KMeanInitMapper extends Mapper<LongWritable, Text, IntWritable, Tex
 	@Override
 	protected void map(LongWritable key, Text value, Mapper<LongWritable, Text, IntWritable, Text>.Context context)
 			throws IOException, InterruptedException {
-		context.write(new IntWritable(1), value);
+		String[] arr =  value.toString().split(",") ;
+		StringBuilder sb = new StringBuilder() ;
+		for(int i = 0 ; i < arr.length -1 ; i++) {
+			sb.append(arr[i]);
+			if(i != arr.length -2) {
+				sb.append(",");
+			}
+		}
+		context.write(new IntWritable(1), new Text(sb.toString()));			
 	}
 
 	@Override
 	public void run(Mapper<LongWritable, Text, IntWritable, Text>.Context context)
 			throws IOException, InterruptedException {
 		
-		Configuration conf = new Configuration() ;
+		Configuration conf = context.getConfiguration() ;
 		int k = Integer.valueOf(conf.get("kmeans.k")) ;
 		
 		// TODO this is weird 

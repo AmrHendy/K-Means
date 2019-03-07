@@ -20,8 +20,9 @@ public class KMeanIterationReducer extends Reducer<IntWritable, Text, IntWritabl
 		int dim_n = 0 ;
 		
 		for(Text point_str : points) {
+			
 			String[] point = point_str.toString().split(",") ;
-			for(int i = 0 ; i < point.length ; i++) {
+			for(int i = 0 ; i < point.length-1 ; i++) {
 				double point_dim = Double.valueOf(point[i]) ;
 				// TODO get sure of sliding average
 				average_dim[i] = (dim_n * average_dim[i] + point_dim) / (dim_n + 1)  ;
