@@ -1,11 +1,3 @@
-import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.mllib.linalg.Vector;
-import org.apache.spark.mllib.linalg.Vectors;
-import org.apache.spark.api.java.JavaRDD;
-import org.apache.arrow.flatbuf.Int;
-import org.apache.spark.SparkConf;
-
-
 public class SparkKmean {
 
 	public static void main(String[] args) {

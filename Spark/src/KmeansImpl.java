@@ -5,6 +5,7 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.Function2;
+import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.ml.linalg.Vector;
 import org.apache.spark.ml.linalg.Vectors;
 
@@ -26,39 +27,45 @@ public class KmeansImpl {
 		this.dimensions = dimensions;
 		String appName = "kmeans";
 		SparkConf conf = new SparkConf().setAppName(appName);
+		conf.setMaster("local[4]");
 		this.sc = new JavaSparkContext(conf);
 	}
 	
 	public void run() {
 		JavaRDD<String> data  = this.sc.textFile(this.inputPath);
 		JavaRDD<Vector> all_points = data.map(line -> {
-			String[] sarray = line.split(" ");
+			String[] sarray = line.split(",");
 			double[] values = new double[sarray.length];
-			for (int i = 0; i < sarray.length; i++) {
+			for (int i = 0; i < sarray.length - 1 ; i++) {
 				values[i] = Double.parseDouble(sarray[i]);
 			}
 			return Vectors.dense(values);		
 		}) ;
 		
-		ArrayList<Vector> centroids = (ArrayList<Vector>) all_points.take(numCentroids) ;
-		ArrayList<Integer> setCounts = new ArrayList<Integer>(centroids.size()) ;
+		java.util.List<Vector> centroids =  all_points.take(numCentroids) ;
 		
-		JavaRDD<Vector> rdd_centroids = sc.parallelize(centroids) ;
-		JavaRDD<Integer> rdd_setCounts = sc.parallelize(setCounts) ;
+		ArrayList<Tuple2<Integer, Vector>> centroids_p = new ArrayList<Tuple2<Integer,Vector>>();
+		
+		for(int i = 0 ; i < centroids.size() ; i++) {
+			centroids_p.add(new Tuple2<Integer, Vector>(i, centroids.get(i))) ;
+		}
+	
+		JavaPairRDD<Integer,Vector> old_centroids = sc.parallelizePairs(centroids_p) ;
 		
 		while(true) {
+			
+			java.util.List<Vector> lis = old_centroids.values().collect() ;
 			
 			JavaPairRDD<Integer,Vector> points = all_points.mapToPair(point ->{
 				int centroidAssigned = -1 ; 
 				double minDistance = Integer.MAX_VALUE ;
-				for(int i = 0 ; i < rdd_centroids.collect().size() ; i++) {
-					double currentDistance = distance(rdd_centroids.collect().get(centroidAssigned), point);  
+				for(int i = 0 ; i < lis.size() ; i++) {
+					double currentDistance = distance(lis.get(centroidAssigned), point);  
 					if(currentDistance < minDistance) {
 						minDistance = currentDistance ;
 						centroidAssigned = i ;
 					}
 				}
-				rdd_setCounts.collect().set(centroidAssigned - 1, rdd_setCounts.collect().get(centroidAssigned) + 1);
 				return new Tuple2<Integer,Vector>(centroidAssigned, point);
 			});
 			
@@ -81,41 +88,60 @@ public class KmeansImpl {
 				}
 			}).sortByKey();
 			
-			ArrayList<Vector> old_centroids = centroids ;
 			
-			calculated_centroids.mapToPair( element ->{
-				return new Tuple2<Integer,Vector>(element._1, average(element._2, rdd_setCounts.collect().get(element._1))) ;
-			});
+			JavaPairRDD<Integer,Integer> counts = calculated_centroids.mapToPair(t -> new Tuple2<>(t._1(), 1))
+					.reduceByKey((a, b) -> a + b);
 			
-			centroids = (ArrayList<Vector>) calculated_centroids.values().collect();
-			for(int i = 0 ; i < centroids.size() ; i++) {
-				centroids.set(i, average(centroids.get(i), setCounts.get(i))) ;
-			}
-			setCounts = new ArrayList<Integer>(centroids.size()) ;
+			JavaPairRDD<Integer,Vector> new_centroids = counts.join(calculated_centroids)
+					.mapToPair(new PairFunction<Tuple2<Integer,Tuple2<Integer,Vector>>, Integer, Vector>() {
+						/**
+						 * 
+						 */
+						private static final long serialVersionUID = 1L;
+
+						@Override								
+						public Tuple2<Integer, Vector> call(Tuple2<Integer, Tuple2<Integer, Vector>> res) throws Exception {
+							// TODO Auto-generated method stub
+							double[] total = new double[res._2._2.size()];
+							for(int i = 0 ; i < res._2._2.size() ; i++) {
+								total[i] = res._2._2.apply(i) / res._2._1.doubleValue() ;
+							}
+							return new Tuple2<Integer, Vector>(res._1, Vectors.dense(total));
+						}
+					});
 			
-			double total_diff = 0 ;
-			for(int i = 0 ; i < old_centroids.size() ; i++) {
-				total_diff += difference(old_centroids.get(i), centroids.get(i)) ;
-			}
+			
+			JavaPairRDD<Integer, Double> diff = old_centroids.join(new_centroids).mapToPair(new PairFunction<Tuple2<Integer,Tuple2<Vector,Vector>>, Integer, Double>() {
+
+				/**
+				 * 
+				 */
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				public Tuple2<Integer, Double> call(Tuple2<Integer, Tuple2<Vector, Vector>> res) throws Exception {
+					// TODO Auto-generated method stub
+					double sum = 0 ;
+					for(int i = 0 ; i < res._2._1.size() ; i++) {
+						sum += Math.pow(res._2._1.apply(i) - res._2._2.apply(i) , 2) ;
+					}
+					sum = Math.sqrt(sum) ;
+					
+					return new Tuple2<Integer, Double>(1, sum);
+				}
+			}).reduceByKey((a, b) -> a + b);
 			
 			double threshold = Math.pow(0.001 ,2) * this.numCentroids * this.dimensions  ;
-			if(total_diff < threshold) {
-				calculated_centroids.values().saveAsTextFile(outPath);
+			if(diff.values().collect().get(0) < threshold) {
+				new_centroids.values().saveAsTextFile(outPath);
 				break ;
 			}
+			old_centroids = new_centroids ; 
 		}		
 		this.sc.close();
 
 	}
 
-	private Vector average(Vector v1, int n) {
-		double[] averaged = v1.toArray() ;
-		for(int i = 0 ; i < v1.size() ; i++) {
-			averaged[i] = averaged[i] / n;
-		}
-		return Vectors.dense(averaged) ;
-	}
-	
 	public double difference(Vector v1, Vector v2) {
 		double total = 0 ;
 		for(int i = 0 ; i < v1.size() ; i++) {
@@ -123,8 +149,6 @@ public class KmeansImpl {
 		}
 		return total ;
 	}
-	
-	
 	
 	public double distance(Vector v1, Vector v2) {
 		double totalSquare = 0 ;
