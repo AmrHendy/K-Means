@@ -1,4 +1,5 @@
 import java.util.ArrayList;
+import java.util.logging.Level;
 
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -29,7 +30,7 @@ public class KmeansImpl {
 		SparkConf conf = new SparkConf().setAppName(appName);
 		conf.setMaster("local[4]");
 		this.sc = new JavaSparkContext(conf);
-		this.sc.setLogLevel("WARN");
+		this.sc.setLogLevel(Level.OFF.getName());
 	}
 	
 	public void run() {
@@ -43,8 +44,6 @@ public class KmeansImpl {
 			return Vectors.dense(values);		
 		}) ;
 		
-		System.out.println("number of centroids are : "  + numCentroids);
-		
 		java.util.List<Vector> centroids =  all_points.take(numCentroids) ;
 		
 		ArrayList<Tuple2<Integer, Vector>> centroids_p = new ArrayList<Tuple2<Integer,Vector>>();
@@ -55,19 +54,21 @@ public class KmeansImpl {
 	
 		JavaPairRDD<Integer,Vector> old_centroids = sc.parallelizePairs(centroids_p) ;
 		
-		old_centroids.foreach(point->{
-			System.out.println("centroid " + point._1 + " => " + point);
-		});
+		int iterations = 0 , max_iterations = 30;
 		
-		while(true) {
+		long t1 =  System.currentTimeMillis() ;
+		
+		while(iterations < max_iterations) {
+			
+			iterations += 1 ;
+			System.out.println("=================iteration"+ iterations +"===================");
+			System.out.println();
 			
 			old_centroids.foreach(point->{
-				System.out.println("old centroid" + point._1 + " => " + point);
+				System.out.println("old centroid " + point._1 + " => " + point);
 			});
-
 			
 			java.util.List<Vector> lis = old_centroids.sortByKey().values().collect() ;
-
 			JavaPairRDD<Integer,Vector> points = all_points.mapToPair(point ->{
 				int centroidAssigned = -1 ; 
 				double minDistance = Integer.MAX_VALUE ;
@@ -96,17 +97,10 @@ public class KmeansImpl {
 				}
 				return Vectors.dense(total);
 			});
-
-			calculated_centroids.foreach(point->{
-				System.out.println("calculated centroid sum" + point._1 + " => " + point);
-			});
+			
 			
 			JavaPairRDD<Integer,Integer> counts = points.mapToPair(t -> new Tuple2<>(t._1, 1))
 					.reduceByKey((a, b) -> a + b);
-			
-			counts.foreach(point->{
-				System.out.println("calculated centroid count" + point._1 + " => " + point);
-			});
 						
 			JavaPairRDD<Integer,Vector> new_centroids = counts.join(calculated_centroids).mapToPair(res->{
 				double[] total = new double[res._2._2.size()];
@@ -128,17 +122,21 @@ public class KmeansImpl {
 				return new Tuple2<Integer, Double>(1, sum);
 			}).reduceByKey((a, b) -> a + b);
 			
-			diff.foreach(point->{
-				System.out.println("new diff" + point._1 + " => " + point);
-			});
-			
 			double threshold = Math.pow(0.001 ,2) * this.numCentroids * this.dimensions  ;
 			if(diff.values().collect().get(0) < threshold) {
 				new_centroids.saveAsTextFile(outPath);
+				long t2 =  System.currentTimeMillis() ;
+				System.out.println();
+				System.out.println("**************************************************");
+				System.out.println("Time token by parallel is : " + (t2-t1) + "ms");
 				break ;
 			}	
 			
 			old_centroids = new_centroids ; 
+			
+			System.out.println("\n=============End of iteration"+ iterations +"=================");
+			System.out.println();
+
 			
 		}		
 		this.sc.close();
