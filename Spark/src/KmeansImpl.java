@@ -66,7 +66,7 @@ public class KmeansImpl {
 			});
 
 			
-			java.util.List<Vector> lis = old_centroids.values().collect() ;
+			java.util.List<Vector> lis = old_centroids.sortByKey().values().collect() ;
 
 			JavaPairRDD<Integer,Vector> points = all_points.mapToPair(point ->{
 				int centroidAssigned = -1 ; 
@@ -86,11 +86,7 @@ public class KmeansImpl {
 				}
 				return new Tuple2<Integer,Vector>(centroidAssigned, point);
 			});
-			
-//			points.foreach(point->{
-//				System.out.println("point" + point._1 + " => " + point);
-//			});
-			
+
 			points = points.cache();
 
 			JavaPairRDD<Integer,Vector> calculated_centroids = points.reduceByKey((point,sum)->{
@@ -129,7 +125,6 @@ public class KmeansImpl {
 				for(int i = 0 ; i < res._2._1.size() ; i++) {
 					sum += Math.pow(res._2._1.apply(i) - res._2._2.apply(i) , 2) ;
 				}
-				sum = Math.sqrt(sum) ;
 				return new Tuple2<Integer, Double>(1, sum);
 			}).reduceByKey((a, b) -> a + b);
 			
@@ -139,7 +134,7 @@ public class KmeansImpl {
 			
 			double threshold = Math.pow(0.001 ,2) * this.numCentroids * this.dimensions  ;
 			if(diff.values().collect().get(0) < threshold) {
-				new_centroids.values().saveAsTextFile(outPath);
+				new_centroids.saveAsTextFile(outPath);
 				break ;
 			}	
 			
