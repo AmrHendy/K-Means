@@ -29,18 +29,21 @@ public class KmeansImpl {
 		SparkConf conf = new SparkConf().setAppName(appName);
 		conf.setMaster("local[4]");
 		this.sc = new JavaSparkContext(conf);
+		this.sc.setLogLevel("WARN");
 	}
 	
 	public void run() {
 		JavaRDD<String> data  = this.sc.textFile(this.inputPath);
 		JavaRDD<Vector> all_points = data.map(line -> {
 			String[] sarray = line.split(",");
-			double[] values = new double[sarray.length];
+			double[] values = new double[sarray.length - 1];
 			for (int i = 0; i < sarray.length - 1 ; i++) {
 				values[i] = Double.parseDouble(sarray[i]);
 			}
 			return Vectors.dense(values);		
 		}) ;
+		
+		System.out.println("number of centroids are : "  + numCentroids);
 		
 		java.util.List<Vector> centroids =  all_points.take(numCentroids) ;
 		
@@ -52,15 +55,30 @@ public class KmeansImpl {
 	
 		JavaPairRDD<Integer,Vector> old_centroids = sc.parallelizePairs(centroids_p) ;
 		
+		old_centroids.foreach(point->{
+			System.out.println("centroid " + point._1 + " => " + point);
+		});
+		
 		while(true) {
 			
-			java.util.List<Vector> lis = old_centroids.values().collect() ;
+			old_centroids.foreach(point->{
+				System.out.println("old centroid" + point._1 + " => " + point);
+			});
+
 			
+			java.util.List<Vector> lis = old_centroids.values().collect() ;
+
 			JavaPairRDD<Integer,Vector> points = all_points.mapToPair(point ->{
 				int centroidAssigned = -1 ; 
 				double minDistance = Integer.MAX_VALUE ;
 				for(int i = 0 ; i < lis.size() ; i++) {
-					double currentDistance = distance(lis.get(centroidAssigned), point);  
+					double totalSquare = 0 ;
+					Vector v1 = lis.get(i);
+					Vector v2 = point;
+					for(int j = 0 ; j < v1.size() ; j++) {
+						totalSquare += Math.pow(v1.apply(j) - v2.apply(j), 2);
+					}
+					double currentDistance = Math.sqrt(totalSquare) ;  
 					if(currentDistance < minDistance) {
 						minDistance = currentDistance ;
 						centroidAssigned = i ;
@@ -69,74 +87,64 @@ public class KmeansImpl {
 				return new Tuple2<Integer,Vector>(centroidAssigned, point);
 			});
 			
+//			points.foreach(point->{
+//				System.out.println("point" + point._1 + " => " + point);
+//			});
+			
 			points = points.cache();
-			
-			JavaPairRDD<Integer,Vector> calculated_centroids = points.reduceByKey(new Function2<Vector, Vector, Vector>() {
-				/**
-				 * 
-				 */
-				private static final long serialVersionUID = 1L;
-				
-				@Override
-				public Vector call(Vector point1, Vector point2) throws Exception {
-					// TODO Auto-generated method stub
-					double[] total = new double[point1.size()];
-					for(int i = 0 ; i < point1.size() ; i++) {
-						total[i] = point1.apply(i) + point2.apply(i);
-					}
-					return Vectors.dense(total);
+
+			JavaPairRDD<Integer,Vector> calculated_centroids = points.reduceByKey((point,sum)->{
+				double[] total = new double[point.size()];
+				for(int i = 0 ; i < point.size() ; i++) {
+					total[i] = point.apply(i) + sum.apply(i);
 				}
-			}).sortByKey();
+				return Vectors.dense(total);
+			});
+
+			calculated_centroids.foreach(point->{
+				System.out.println("calculated centroid sum" + point._1 + " => " + point);
+			});
 			
-			
-			JavaPairRDD<Integer,Integer> counts = calculated_centroids.mapToPair(t -> new Tuple2<>(t._1(), 1))
+			JavaPairRDD<Integer,Integer> counts = points.mapToPair(t -> new Tuple2<>(t._1, 1))
 					.reduceByKey((a, b) -> a + b);
 			
-			JavaPairRDD<Integer,Vector> new_centroids = counts.join(calculated_centroids)
-					.mapToPair(new PairFunction<Tuple2<Integer,Tuple2<Integer,Vector>>, Integer, Vector>() {
-						/**
-						 * 
-						 */
-						private static final long serialVersionUID = 1L;
-
-						@Override								
-						public Tuple2<Integer, Vector> call(Tuple2<Integer, Tuple2<Integer, Vector>> res) throws Exception {
-							// TODO Auto-generated method stub
-							double[] total = new double[res._2._2.size()];
-							for(int i = 0 ; i < res._2._2.size() ; i++) {
-								total[i] = res._2._2.apply(i) / res._2._1.doubleValue() ;
-							}
-							return new Tuple2<Integer, Vector>(res._1, Vectors.dense(total));
-						}
-					});
-			
-			
-			JavaPairRDD<Integer, Double> diff = old_centroids.join(new_centroids).mapToPair(new PairFunction<Tuple2<Integer,Tuple2<Vector,Vector>>, Integer, Double>() {
-
-				/**
-				 * 
-				 */
-				private static final long serialVersionUID = 1L;
-
-				@Override
-				public Tuple2<Integer, Double> call(Tuple2<Integer, Tuple2<Vector, Vector>> res) throws Exception {
-					// TODO Auto-generated method stub
-					double sum = 0 ;
-					for(int i = 0 ; i < res._2._1.size() ; i++) {
-						sum += Math.pow(res._2._1.apply(i) - res._2._2.apply(i) , 2) ;
-					}
-					sum = Math.sqrt(sum) ;
-					
-					return new Tuple2<Integer, Double>(1, sum);
+			counts.foreach(point->{
+				System.out.println("calculated centroid count" + point._1 + " => " + point);
+			});
+						
+			JavaPairRDD<Integer,Vector> new_centroids = counts.join(calculated_centroids).mapToPair(res->{
+				double[] total = new double[res._2._2.size()];
+				for(int i = 0 ; i < res._2._2.size() ; i++) {
+					total[i] = res._2._2.apply(i) / res._2._1.doubleValue() ;
 				}
+				return new Tuple2<Integer, Vector>(res._1, Vectors.dense(total));
+			});
+			
+			new_centroids.foreach(point->{
+				System.out.println("new centroid " + point._1 + " => " + point);
+			});
+			
+			JavaPairRDD<Integer, Double> diff = old_centroids.join(new_centroids).mapToPair(res -> {
+				double sum = 0 ;
+				for(int i = 0 ; i < res._2._1.size() ; i++) {
+					sum += Math.pow(res._2._1.apply(i) - res._2._2.apply(i) , 2) ;
+				}
+				sum = Math.sqrt(sum) ;
+				return new Tuple2<Integer, Double>(1, sum);
 			}).reduceByKey((a, b) -> a + b);
+			
+			diff.foreach(point->{
+				System.out.println("new diff" + point._1 + " => " + point);
+			});
 			
 			double threshold = Math.pow(0.001 ,2) * this.numCentroids * this.dimensions  ;
 			if(diff.values().collect().get(0) < threshold) {
 				new_centroids.values().saveAsTextFile(outPath);
 				break ;
-			}
+			}	
+			
 			old_centroids = new_centroids ; 
+			
 		}		
 		this.sc.close();
 
